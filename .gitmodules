@@ -1,7 +1,10 @@
 [submodule "libultraship"]
 	path = libultraship
-	url = https://github.com/Kenix3/libultraship.git
-	branch = main
+	# The fork, because the pinned commit carries the arm64 top-byte-ignore fix
+	# that Android needs to render at all, and that is not upstream yet
+	# (Kenix3/libultraship#1214). Point this back at Kenix3 once it merges.
+	url = https://github.com/izzy2lost/libultraship.git
+	branch = lighthouse-android-tbi-fix
 [submodule "Torch"]
 	path = Torch
 	url = https://github.com/HarbourMasters/Torch.git

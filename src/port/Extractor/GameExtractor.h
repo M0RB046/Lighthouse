@@ -25,6 +25,17 @@ public:
     bool GenerateOTR(std::string appShortName = "");
     bool GenerateOTR(std::atomic<size_t>& assetCount, std::string appShortName = "");
     bool GenerateOTR(std::atomic<size_t>& assetCount, std::atomic<size_t>& totalAssets, std::string appShortName = "");
+    // Same as GenerateOTR, but with the two directories named outright instead of
+    // resolved through Ship::Context. Android's launcher runs before SDL exists,
+    // so Context cannot resolve a path yet and passes them in.
+    bool GenerateOTRTo(std::atomic<size_t>& assetCount, std::atomic<size_t>& totalAssets, const std::string& assetsPath,
+                       const std::string& gamePath);
+    // Whether a custom-code romhack may pause extraction to ask the user what to
+    // do. That answer arrives from the ImGui main loop, so a caller without one
+    // (the Android launcher) would wait for it forever.
+    void SetInteractive(bool enabled) {
+        mInteractive = enabled;
+    }
     void WritePortVersion();
     void SetDialogPack(bool enabled) {
         mDialogPack = enabled;
@@ -50,4 +61,5 @@ private:
     std::vector<uint8_t> mGameData;
     std::string mSearchPath;
     bool mDialogPack = false;
+    bool mInteractive = true;
 };
