@@ -7,4 +7,8 @@
 	branch = lighthouse-android-tbi-fix
 [submodule "Torch"]
 	path = Torch
-	url = https://github.com/HarbourMasters/Torch.git
+	# The fork, because the pinned commit drops a dead per-asset copy of the
+	# whole ROM that more than halves extraction time. Not upstream yet; point
+	# this back at HarbourMasters once it lands there.
+	url = https://github.com/izzy2lost/Torch.git
+	branch = android-drop-dead-rom-copy
