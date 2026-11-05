@@ -28,7 +28,12 @@
     android:background="@android:color/transparent"
     android:fitsSystemWindows="true">
 
-    <!-- Everything the Hide button collapses; the toggle itself stays outside. -->
+    <!--
+        The pad. MainActivity hides it while a physical controller is connected
+        (until the screen is touched) and while the in-game menu is open.
+        Menu and Mods live outside it on purpose: Mods has to stay visible
+        while the menu is open, and MainActivity shows/hides Menu separately.
+    -->
     <androidx.constraintlayout.widget.ConstraintLayout
         android:id="@+id/button_group"
         android:layout_width="match_parent"
@@ -249,7 +254,7 @@
             app:layout_constraintTop_toBottomOf="@id/buttonCUp" />
     </androidx.constraintlayout.widget.ConstraintLayout>
 
-        <!-- Opens libultraship's menu (Escape) -->
+    <!-- Opens libultraship's menu (Escape). Select/Back on a physical pad do the same. -->
     <Button
         android:id="@+id/buttonMenu"
         android:layout_width="60dp"
@@ -277,20 +282,5 @@
         app:layout_constraintBottom_toBottomOf="@id/buttonMenu"
         app:layout_constraintStart_toEndOf="@id/buttonMenu"
         app:layout_constraintTop_toTopOf="@id/buttonMenu" />
-
-    <!--
-        Outside button_group so it survives hiding the controls. Top right,
-        inboard of R: the bottom-right corner belongs to A, and the two
-        overlapped there.
-    -->
-    <Button
-        android:id="@+id/buttonToggle"
-        android:layout_width="30dp"
-        android:layout_height="30dp"
-        android:layout_marginTop="26dp"
-        android:layout_marginEnd="132dp"
-        android:background="@drawable/ic_show"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintTop_toTopOf="parent" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
