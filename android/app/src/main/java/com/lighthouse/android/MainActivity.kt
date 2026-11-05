@@ -3,6 +3,7 @@ package com.lighthouse.android
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.SharedPreferences
+import android.hardware.input.InputManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -11,6 +12,7 @@ import android.os.Looper
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.util.Log
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -43,6 +45,8 @@ class MainActivity : SDLActivity() {
     private lateinit var preferences: SharedPreferences
     private lateinit var modsButton: Button
     private lateinit var controlGroup: ViewGroup
+    private lateinit var menuButton: Button
+    private lateinit var inputManager: InputManager
 
     // Set between the create-document result and the engine finishing its write.
     private var pendingCreateUri: Uri? = null
@@ -50,9 +54,24 @@ class MainActivity : SDLActivity() {
 
     private var controlsEnabled = true
     private var menuOpen = false
-    private var controlsHidden = false
+    private var gamepadConnected = false
 
     private val handler = Handler(Looper.getMainLooper())
+
+    // Hides the on-screen controls again a few seconds after the last touch
+    // while a physical gamepad is connected.
+    private val hideHandler = Handler(Looper.getMainLooper())
+    private val hideRunnable = Runnable {
+        if (!menuOpen) setPadShown(false)
+    }
+
+    // Picks up gamepads being plugged in or removed while the game is running.
+    private val deviceListener = object : InputManager.InputDeviceListener {
+        override fun onInputDeviceAdded(deviceId: Int) = refreshGamepadState()
+        override fun onInputDeviceRemoved(deviceId: Int) = refreshGamepadState()
+        override fun onInputDeviceChanged(deviceId: Int) = refreshGamepadState()
+    }
+
     private val menuWatcher = object : Runnable {
         override fun run() {
             syncMenuState()
@@ -226,6 +245,9 @@ class MainActivity : SDLActivity() {
         goFullscreen()
         setupControllerOverlay()
         attachController()
+        inputManager = getSystemService(INPUT_SERVICE) as InputManager
+        gamepadConnected = hasPhysicalGamepad()
+        applyControlVisibility()
     }
 
     /**
@@ -266,18 +288,23 @@ class MainActivity : SDLActivity() {
         super.onResume()
         // Re-sync immediately as well as on the timer, so coming back from the
         // mods manager never leaves the overlay showing a stale menu state.
+        inputManager.registerInputDeviceListener(deviceListener, handler)
+        refreshGamepadState()
         syncMenuState()
         handler.removeCallbacks(menuWatcher)
         handler.postDelayed(menuWatcher, MENU_POLL_MS)
     }
 
     override fun onPause() {
+        inputManager.unregisterInputDeviceListener(deviceListener)
         handler.removeCallbacks(menuWatcher)
+        hideHandler.removeCallbacks(hideRunnable)
         super.onPause()
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(menuWatcher)
+        hideHandler.removeCallbacks(hideRunnable)
         detachController()
         super.onDestroy()
 
@@ -379,9 +406,10 @@ class MainActivity : SDLActivity() {
         modsButton = overlay.findViewById(R.id.buttonMods)
         modsButton.setOnClickListener { startActivity(Intent(this, ModsActivity::class.java)) }
 
-        setupMenuButton(overlay.findViewById(R.id.buttonMenu))
+        menuButton = overlay.findViewById(R.id.buttonMenu)
+        setupMenuButton(menuButton)
+
         setupJoystick(overlay.findViewById(R.id.left_joystick), overlay.findViewById(R.id.left_joystick_knob))
-        setupToggleButton(overlay.findViewById(R.id.buttonToggle))
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -457,15 +485,11 @@ class MainActivity : SDLActivity() {
         }
     }
 
-    private fun setupToggleButton(button: Button) {
-        controlsHidden = preferences.getBoolean(KEY_CONTROLS_HIDDEN, false)
-        applyControlVisibility()
-
-        button.setOnClickListener {
-            controlsHidden = !controlsHidden
-            applyControlVisibility()
-            preferences.edit().putBoolean(KEY_CONTROLS_HIDDEN, controlsHidden).apply()
-        }
+    /** Pad and Menu together. Mods is not part of this; menuOpen governs it. */
+    private fun setPadShown(shown: Boolean) {
+        val v = if (shown) View.VISIBLE else View.INVISIBLE
+        controlGroup.visibility = v
+        menuButton.visibility = v
     }
 
     /**
@@ -475,12 +499,23 @@ class MainActivity : SDLActivity() {
      * into, and a Button swallows a touch whether or not its listener acts on
      * it. Leaving it up meant the L button covered the menu's sidebar and ate
      * taps meant for it. An INVISIBLE view receives no touches, so hiding the
-     * group hands the whole screen back to the menu. Menu, Mods and the toggle
-     * sit outside the group so they stay reachable.
+     * group hands the whole screen back to the menu. Menu and Mods sit outside
+     * the group so they stay reachable.
+     *
+     * Outside the menu, the pad is hidden while a physical gamepad is connected
+     * (until the screen is touched) and always shown otherwise.
      */
     private fun applyControlVisibility() {
-        controlGroup.visibility =
-            if (menuOpen || controlsHidden) View.INVISIBLE else View.VISIBLE
+        hideHandler.removeCallbacks(hideRunnable)
+        if (menuOpen) {
+            // No pad, but Menu (and Mods) stay visible so the user can get out.
+            controlGroup.visibility = View.INVISIBLE
+            menuButton.visibility = View.VISIBLE
+        } else {
+            // Gamepad connected: hidden until the screen is touched.
+            // No gamepad: always visible.
+            setPadShown(!gamepadConnected)
+        }
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -533,13 +568,66 @@ class MainActivity : SDLActivity() {
         }
     }
 
+    private fun revealControls() {
+        if (menuOpen) return
+        setPadShown(true)
+        hideHandler.removeCallbacks(hideRunnable)
+    }
+
+    private fun scheduleAutoHide() {
+        hideHandler.removeCallbacks(hideRunnable)
+        if (gamepadConnected && !menuOpen) {
+            hideHandler.postDelayed(hideRunnable, AUTO_HIDE_MS)
+        }
+    }
+
+    private fun refreshGamepadState() {
+        val connected = hasPhysicalGamepad()
+        if (connected == gamepadConnected) return
+        gamepadConnected = connected
+        applyControlVisibility()
+    }
+
+    private fun hasPhysicalGamepad(): Boolean =
+        InputDevice.getDeviceIds().any { id ->
+            val device = InputDevice.getDevice(id) ?: return@any false
+            if (device.isVirtual) return@any false
+            val sources = device.sources
+            (sources and InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD ||
+                (sources and InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK
+        }
+
+    override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
+        when (ev?.actionMasked) {
+            MotionEvent.ACTION_DOWN -> revealControls()
+            // Only when the last finger lifts, so nothing hides while held down.
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> scheduleAutoHide()
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    // Select on a physical gamepad opens the menu, same as the on-screen Menu button.
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BUTTON_SELECT) {
+            when (event.action) {
+                KeyEvent.ACTION_DOWN ->
+                    if (event.repeatCount == 0) onNativeKeyDown(KeyEvent.KEYCODE_ESCAPE)
+                KeyEvent.ACTION_UP -> onNativeKeyUp(KeyEvent.KEYCODE_ESCAPE)
+            }
+            return true
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     private companion object {
         const val TAG = "Lighthouse"
         const val PREFS = "com.lighthouse.android.prefs"
-        const val KEY_CONTROLS_HIDDEN = "controlsHidden"
 
         /** Fast enough to feel immediate on a menu toggle, cheap enough to ignore. */
         const val MENU_POLL_MS = 150L
+
+        /** How long the pad stays up after the last touch when a gamepad is connected. */
+        const val AUTO_HIDE_MS = 3000L
 
         const val REQUEST_PICK_DOCUMENT = 0x1470
         const val REQUEST_CREATE_DOCUMENT = 0x1471
